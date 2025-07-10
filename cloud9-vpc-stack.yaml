@@ -9,12 +9,12 @@ Parameters:
     Description: CIDR block for VPC
   VpcSubnet1AZ:
     Type: AWS::EC2::AvailabilityZone::Name
+    Default: us-west-2a
     Description: Availability Zone for subnet 1 (e.g. us-east-1a, us-west-2a, etc.)
-    AllowedPattern : .+
   VpcSubnet2AZ:
     Type: AWS::EC2::AvailabilityZone::Name
+    Default: us-west-2b
     Description: Availability Zone for subnet 2 (e.g. us-east-1b, us-west-2b, etc.)
-    AllowedPattern : .+
   VpcSubnet1CidrBlock:
     Type: String
     Default: 10.0.0.0/24
