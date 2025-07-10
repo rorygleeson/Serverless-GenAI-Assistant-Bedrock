@@ -41,5 +41,4 @@ jobs:
           name: CreateVPCresources
           template: cloud9-vpc-stack.yaml
           no-fail-on-empty-changeset: "1"
-          parameter-overrides: "EC2InstanceType=t2.micro"
   
