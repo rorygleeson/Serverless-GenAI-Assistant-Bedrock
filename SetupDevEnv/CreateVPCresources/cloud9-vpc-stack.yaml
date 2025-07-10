@@ -1,0 +1,184 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  AWS CloudFormation template to create network resources for Cloud9 environment
+Parameters:
+  VpcCidrBlock:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for VPC
+  VpcSubnet1AZ:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Availability Zone for subnet 1 (e.g. us-east-1a, us-west-2a, etc.)
+    AllowedPattern : .+
+  VpcSubnet2AZ:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Availability Zone for subnet 2 (e.g. us-east-1b, us-west-2b, etc.)
+    AllowedPattern : .+
+  VpcSubnet1CidrBlock:
+    Type: String
+    Default: 10.0.0.0/24
+    Description: CIDR block for subnet 1
+  VpcSubnet2CidrBlock:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: CIDR block for subnet 2
+
+Resources:
+  ################## VPC resources #################
+  C9Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      Tags:
+        - Key: Name
+          Value: Cloud9-VPC
+
+  C9VpcSubnet1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref C9Vpc
+      CidrBlock: !Ref VpcSubnet1CidrBlock
+      AvailabilityZone: !Ref VpcSubnet1AZ
+      MapPublicIpOnLaunch: "True"
+      Tags:
+        - Key: Name
+          Value: Cloud9-VPC-Subnet-1a
+
+  C9VpcSubnet1b:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref C9Vpc
+      CidrBlock: !Ref VpcSubnet2CidrBlock
+      AvailabilityZone: !Ref VpcSubnet2AZ
+      MapPublicIpOnLaunch: "true"
+      Tags:
+        - Key: Name
+          Value: Cloud9-VPC-Subnet-1b
+
+  C9VpcRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref C9Vpc
+      Tags:
+        - Key: Name
+          Value: Cloud9-VPC-RouteTable
+
+  C9VpcSubnet1aRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref C9VpcRouteTable
+      SubnetId: !Ref C9VpcSubnet1a
+
+  C9VpcSubnet1bRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref C9VpcRouteTable
+      SubnetId: !Ref C9VpcSubnet1b
+
+  VpcEndpointSecGrp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for C9 VPC endpoints
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref C9Vpc
+
+  ################## VPC Endpoints #################
+
+  SSMEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecGrp
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssm"
+      SubnetIds:
+        - !Ref C9VpcSubnet1a
+        - !Ref C9VpcSubnet1b
+      VpcEndpointType: "Interface"
+      VpcId: !Ref C9Vpc
+
+  SSMMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecGrp
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssmmessages"
+      SubnetIds:
+        - !Ref C9VpcSubnet1a
+        - !Ref C9VpcSubnet1b
+      VpcEndpointType: "Interface"
+      VpcId: !Ref C9Vpc
+
+  EC2MessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecGrp
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ec2messages"
+      SubnetIds:
+        - !Ref C9VpcSubnet1a
+        - !Ref C9VpcSubnet1b
+      VpcEndpointType: "Interface"
+      VpcId: !Ref C9Vpc
+
+  EC2Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecGrp
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ec2"
+      SubnetIds:
+        - !Ref C9VpcSubnet1a
+        - !Ref C9VpcSubnet1b
+      VpcEndpointType: "Interface"
+      VpcId: !Ref C9Vpc
+
+  ################## Internet Gateway resources #################
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Cloud9-InternetGateway
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref C9Vpc
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGateway
+    Properties:
+      RouteTableId:
+        Ref: C9VpcRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+Outputs:
+  VpcId:
+    Value: !Ref C9Vpc
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcId"
+  SubnetIds:
+    Value: !Join [",", [!Ref C9VpcSubnet1a, !Ref C9VpcSubnet1b]]
+    Export:
+      Name: !Sub "${AWS::StackName}-SubnetIds"
+  SecurityGroupId:
+    Value: !Ref VpcEndpointSecGrp
+    Export:
+      Name: !Sub "${AWS::StackName}-SecurityGroupId"
