@@ -39,6 +39,6 @@ jobs:
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
           name: webapp-s3-knowledgedoc-bucket-stack
-          template: createS3ForKnowledgeBase/webapp-s3-knowledgedoc-bucket-stack.yaml
+          template: createS3ForKnowledgeBase/webapp-s3-knowledgedoc-bucket-stack.yml
           no-fail-on-empty-changeset: "1"
   
