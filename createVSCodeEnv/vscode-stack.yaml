@@ -440,7 +440,7 @@ Resources:
       IpProtocol: tcp
       FromPort: 0
       ToPort: 65535
-      SourceSecurityGroupId: !Ref ${VSCodeVpcStackName}-SecurityGroupId
+      SourceSecurityGroupId: "cloud9-vpc-stack-SecurityGroupId"
 
   VpcCodeSecGrpSelfIngress:
     Type: AWS::EC2::SecurityGroupIngress
