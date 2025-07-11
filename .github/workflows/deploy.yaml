@@ -39,6 +39,6 @@ jobs:
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
           name: CreateVPCresources
-          template: cloud9-vpc-stack.yaml
+          template: createVPCresources/cloud9-vpc-stack.yaml
           no-fail-on-empty-changeset: "1"
   
