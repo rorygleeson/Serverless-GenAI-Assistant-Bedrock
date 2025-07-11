@@ -430,7 +430,8 @@ Resources:
       Tags:
         - Key: Environment
           Value: Dev
-      VpcId: "cloud9-vpc-stack-VpcId"
+      VpcId:
+        Fn::ImportValue: !Sub ${VSCodeVpcStackName}-VpcId
 
   VpcCodeSecGrpIngress:
     Type: AWS::EC2::SecurityGroupIngress
@@ -439,7 +440,8 @@ Resources:
       IpProtocol: tcp
       FromPort: 0
       ToPort: 65535
-      SourceSecurityGroupId: "cloud9-vpc-stack-SecurityGroupId"
+      SourceSecurityGroupId:
+        Fn::ImportValue: !Sub ${VSCodeVpcStackName}-SecurityGroupId
 
   VpcCodeSecGrpSelfIngress:
     Type: AWS::EC2::SecurityGroupIngress
@@ -453,7 +455,8 @@ Resources:
   VpcEndpointSecGrpIngress:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
-      GroupId: "cloud9-vpc-stack-SecurityGroupId"
+      GroupId:
+        Fn::ImportValue: !Sub ${VSCodeVpcStackName}-SecurityGroupId
       IpProtocol: tcp
       FromPort: 0
       ToPort: 65535
@@ -561,7 +564,7 @@ Resources:
         - Fn::Split:
           - ","
           - Fn::ImportValue:
-              !Sub "cloud9-vpc-stack-SubnetIds"
+              !Sub "${VSCodeVpcStackName}-SubnetIds"
       KeyName: !Ref "AWS::NoValue"
       Tags:
         - Key: Name
