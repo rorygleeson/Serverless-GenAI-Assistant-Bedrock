@@ -1,0 +1,590 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS CloudFormation template to create VSCode environment with automated configuration.
+Parameters:
+  VSCodeInstanceType:
+    Description: VSCode Instance type
+    Type: String
+    Default: m5.large
+    AllowedValues:
+      - m5.large
+      - m5.2xlarge
+    ConstraintDescription: Must be a valid VSCode instance type
+  VSCodeInstanceVolumeSize:
+    Type: Number
+    Description: The Size in GB of the VSCode Instance Volume.
+    Default: 300
+  VSCodeImageName:
+    Description: VSCode Image Name
+    Type: String
+    Default: al2023-ami-20*-kernel-*-x86_64
+  VSCodeVpcStackName:
+    Description: VSCode VPC Stack name
+    Type: String
+    Default: cloud9-vpc-stack
+  HomeFolder:
+    Type: String
+    Description: The home folder in the VSCodeInstance
+    Default: /home/ec2-user/environment
+  ServerBasePath:
+    Type: String
+    Description: The base path for the application to be added to nginx config for code-server
+    Default: frontend
+  ServerPort:
+    Type: Number
+    Description: The port for the Server
+    Default: 8081
+Mappings:
+  Subnets:
+    VPC:
+      CIDR: '10.0.0.0/16'
+    PublicOne:
+      CIDR: '10.0.1.0/24'
+    PublicTwo:
+      CIDR: '10.0.2.0/24'
+    PrivateOne:
+      CIDR: '10.0.3.0/24'
+    PrivateTwo:
+      CIDR: '10.0.4.0/24'
+  # aws ec2 describe-managed-prefix-lists  --region <REGION> | jq -r '.PrefixLists[] | select (.PrefixListName == "com.amazonaws.global.cloudfront.origin-facing") | .PrefixListId'
+  AWSRegions2PrefixListID:
+    ap-northeast-1:
+      PrefixList: pl-58a04531
+    ap-northeast-2:
+      PrefixList: pl-22a6434b
+    ap-south-1:
+      PrefixList: pl-9aa247f3
+    ap-southeast-1:
+      PrefixList: pl-31a34658
+    ap-southeast-2:
+      PrefixList: pl-b8a742d1
+    ca-central-1:
+      PrefixList: pl-38a64351
+    eu-central-1:
+      PrefixList: pl-a3a144ca
+    eu-north-1:
+      PrefixList: pl-fab65393
+    eu-west-1:
+      PrefixList: pl-4fa04526
+    eu-west-2:
+      PrefixList: pl-93a247fa
+    eu-west-3:
+      PrefixList: pl-75b1541c
+    sa-east-1:
+      PrefixList: pl-5da64334
+    us-east-1:
+      PrefixList: pl-3b927c52
+    us-east-2:
+      PrefixList: pl-b6a144df
+    us-west-1:
+      PrefixList: pl-4ea04527
+    us-west-2:
+      PrefixList: pl-82a045eb
+
+Resources:
+  ################## IAM Roles #################
+  VSCodeLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName:
+            Fn::Join:
+              - ""
+              - - VSCodeLambdaPolicy-
+                - Ref: AWS::Region
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - ec2:DescribeImages
+                  - ec2:DescribeInstances
+                  - ec2:DescribeSecurityGroupRules
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:AssociateIamInstanceProfile
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:ModifyInstanceAttribute
+                  - ec2:DescribeIamInstanceProfileAssociations
+                  - ec2:ReplaceIamInstanceProfileAssociation
+                  - iam:ListInstanceProfiles
+                  - iam:PassRole
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource: "*"
+
+  ############ CloudFront resources ##############
+  VSCodeInstanceCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        DefaultTTL: 86400
+        MaxTTL: 31536000
+        MinTTL: 1
+        Name: VSCodeInstanceCachePolicy
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: all
+          EnableAcceptEncodingGzip: 'false'
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers:
+              - Accept-Charset
+              - Authorization
+              - Origin
+              - Accept
+              - Referer
+              - Host
+              - Accept-Language
+              - Accept-Encoding
+              - Accept-Datetime
+          QueryStringsConfig:
+            QueryStringBehavior: all
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: 'true'
+        HttpVersion: http2
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - PATCH
+            - POST
+            - DELETE
+          CachePolicyId: !Ref VSCodeInstanceCachePolicy
+          # Managed-AllViewer - see https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-origin-request-policies.html
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+          TargetOriginId: !Sub CloudFront-${AWS::StackName}
+          ViewerProtocolPolicy: allow-all
+        Origins:
+          - DomainName: !GetAtt VSCodeInstance.PublicDnsName
+            Id: !Sub CloudFront-${AWS::StackName}
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+
+  ################## SSM resources ###############
+  VSCodeOutputBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  VSCodeSSMDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Tags:
+        - Key: Environment
+          Value: Dev
+      DocumentType: Command
+      DocumentFormat: YAML
+      Content:
+        schemaVersion: "2.2"
+        description: Bootstrap VSCode Instance
+        mainSteps:
+          - action: aws:runShellScript
+            name: VSCodebootstrap
+            inputs:
+              runCommand:
+                - "#!/bin/bash"
+                - date
+                - !Sub CFDNS=${CloudFrontDistribution.DomainName}
+                - !Sub HOMEFOLDER=${HomeFolder}
+                - !Sub WORSPACEPWD=${EnvironmentData.WorkspacePassword}
+                - !Sub REGION=${AWS::Region}
+                - !Sub SIZE=${VSCodeInstanceVolumeSize}
+                - echo '========================='
+                - echo '=== SETUP environment ==='
+                - echo '========================='
+                - echo LANG=en_US.utf-8 >> /etc/environment
+                - echo LC_ALL=en_US.UTF-8 >> /etc/environment
+                - export EC2_HOME="/home/ec2-user"
+                - export AWS_REGION=$REGION
+                - echo 'export EC2_HOME="'$EC2_HOME'"' >> $EC2_HOME/.bashrc
+                - echo 'export AWS_REGION="'$AWS_REGION'"' >> $EC2_HOME/.bashrc
+                - echo 'export AWS_DEFAULT_REGION="'$AWS_REGION'"' >> $EC2_HOME/.bashrc
+                - echo 'PATH=$PATH:/usr/local/bin' >> $EC2_HOME/.bashrc
+                - echo 'export PATH' >> $EC2_HOME/.bashrc
+                - yum -y remove aws-cli
+                - mkdir -p $HOMEFOLDER
+                - sudo chown -R ec2-user $HOMEFOLDER
+                - echo '===================================='
+                - echo '=== INSTALL VSCode configuration ==='
+                - echo '===================================='
+                - sudo curl -fsSL https://code-server.dev/install.sh | sudo sh
+                - sudo systemctl enable --now code-server@ec2-user
+                - sudo systemctl status code-server@ec2-user
+                - sudo systemctl restart code-server@ec2-user
+                - sudo -u ec2-user --login mkdir -p $EC2_HOME/.config/code-server
+                - sudo -u ec2-user --login touch $EC2_HOME/.config/code-server/config.yaml
+                - !Sub |
+                  sudo -u ec2-user --login tee $EC2_HOME/.config/code-server/config.yaml <<EOF
+                  cert: false
+                  auth: password
+                  password: $WORSPACEPWD
+                  EOF
+                - sudo chown -v ec2-user:ec2-user $EC2_HOME/.config/code-server/config.yaml
+                - sudo -u ec2-user --login mkdir -p $EC2_HOME/.local/share/code-server/User/
+                - sudo -u ec2-user --login touch $EC2_HOME/.local/share/code-server/User/settings.json
+                - !Sub |
+                  sudo -u ec2-user --login tee $EC2_HOME/.local/share/code-server/User/settings.json <<EOF
+                  {
+                    "extensions.autoUpdate": false,
+                    "extensions.autoCheckUpdates": false,
+                    "terminal.integrated.cwd": "$HOMEFOLDER",
+                    "telemetry.telemetryLevel": "off",
+                    "security.workspace.trust.startupPrompt": "never",
+                    "security.workspace.trust.enabled": false,
+                    "security.workspace.trust.banner": "never",
+                    "security.workspace.trust.emptyWindow": false,
+                    "[python]": {
+                      "editor.defaultFormatter": "ms-python.black-formatter",
+                      "editor.formatOnSave": true
+                    },
+                    "auto-run-command.rules": [
+                      {
+                        "command": "workbench.action.terminal.new"
+                      }
+                    ],
+                    "workbench.colorTheme": "Default Dark Modern"
+                  }
+                  EOF
+                - sudo systemctl restart code-server@ec2-user
+                - echo '====================='
+                - echo '=== INSTALL GIT ==='
+                - echo '====================='
+                - sudo yum install -y git
+                - echo '====================='
+                - echo '=== INSTALL NGINX ==='
+                - echo '====================='
+                - sudo yum update -y
+                - sudo yum install nginx -y
+                - !Sub |
+                  sudo tee /etc/nginx/conf.d/$CFDNS.conf <<EOF
+                  server {
+                      listen 80;
+                      listen [::]:80 ipv6only=on default_server;
+                      server_name $CFDNS;
+
+                      location / {
+                        proxy_pass http://localhost:8080/;
+                        proxy_set_header Host \$host;
+                        proxy_set_header Upgrade \$http_upgrade;
+                        proxy_set_header Connection upgrade;
+                        proxy_set_header Accept-Encoding gzip;
+                      }
+                      location /${ServerBasePath} {
+                        proxy_pass http://localhost:${ServerPort}/${ServerBasePath}/;
+                        proxy_set_header Host \$host;
+                        proxy_set_header Upgrade \$http_upgrade;
+                        proxy_set_header Connection upgrade;
+                        proxy_set_header Accept-Encoding gzip;
+                      }
+                  }
+                  EOF
+                - sudo fuser -k 443/tcp
+                - systemctl start nginx
+                - systemctl enable nginx
+                - echo '========================================================='
+                - echo '=== INSTALL and CONFIGURE default software components ==='
+                - echo '========================================================='
+                - mkdir $EC2_HOME/.aws
+                - echo '[profile amplify]' > $EC2_HOME/.aws/config
+                - echo 'output = json' >> $EC2_HOME/.aws/config
+                - echo "region = $AWS_REGION" >> $EC2_HOME/.aws/config
+                - echo 'credential_process = aws configure export-credentials' >> $EC2_HOME/.aws/config
+                - chmod 600 $EC2_HOME/.aws/config
+                - cd $EC2_HOME
+                - echo '========================'
+                - echo '=== INSTALL XDG util ==='
+                - echo '========================'
+                - XDG_UTIL_VERSION="xdg-utils-1.1.3"
+                - XDG_UTIL_URL="https://portland.freedesktop.org/download/$XDG_UTIL_VERSION.tar.gz"
+                - curl -O "$XDG_UTIL_URL";
+                - tar -xvf $XDG_UTIL_VERSION.tar.gz;
+                - cd $XDG_UTIL_VERSION/scripts;
+                - (sudo cp ./xdg-open.in /usr/bin;sudo mv /usr/bin/xdg-open.in /usr/bin/xdg-open;sudo chmod +x /usr/bin/xdg-open)
+                - sudo yum install -y xdg-utils;
+                - echo '==================='
+                - echo '=== INSTALL NPM ==='
+                - echo '==================='
+                - NODE_VERSION="20.x"
+                - curl -fsSL "https://rpm.nodesource.com/setup_$NODE_VERSION" | sudo bash -
+                - sudo yum install -y nsolid
+                - echo '==========================='
+                - echo '=== INSTALL Amplify CLI ==='
+                - echo '==========================='
+                - sudo npm install -g @aws-amplify/cli
+                - sudo npm install --save react-cropper
+                - sudo npm install @floating-ui/react
+                - sudo chown ec2-user $EC2_HOME/.aws/config
+                - echo '==========================='
+                - echo '=== INSTALL Python 3.11 ==='
+                - echo '==========================='
+                - python -m pip install --upgrade pip
+                - sudo yum install -y python3.11
+                - sudo yum install -y python3.11-pip
+                - cd $HOMEFOLDER
+                - echo 'alias python3=python3.11' >> $EC2_HOME/.bashrc
+                - echo 'alias pip=pip3.11' >> $EC2_HOME/.bashrc
+                - sudo -u ec2-user bash
+                - sudo -H -u ec2-user bash -c "pip3.11 install --user -U boto boto3 botocore awscli"
+                - echo '=========================================='
+                - echo '=== PREPARE REBOOT in 1 minute with at ==='
+                - echo '=========================================='
+                - FILE=$(mktemp) && echo $FILE && echo '#!/bin/bash' > $FILE && echo 'reboot -f --verbose' >> $FILE && at now + 1 minute -f $FILE
+                - echo "Bootstrap completed with return code $?"
+
+  VSCodeBootstrapAssociation:
+    Type: AWS::SSM::Association
+    DependsOn: VSCodeOutputBucket
+    Properties:
+      Name: !Ref VSCodeSSMDocument
+      OutputLocation:
+        S3Location:
+          OutputS3BucketName: !Ref VSCodeOutputBucket
+          OutputS3KeyPrefix: bootstrapoutput
+      Targets:
+        - Key: tag:Name
+          Values:
+            - VSCodeInstance
+        - Key: tag:SSMBootstrap
+          Values:
+            - Active
+
+  ################## EC2 environment resources ########################
+  VSCodeInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: VSCodeInstanceRole
+      Tags:
+        - Key: Environment
+          Value: Dev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - ssm.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Path: "/service-role/"
+
+  VSCodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+      - Ref: VSCodeInstanceRole
+
+  VpcCodeSecGrp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for VSCode server
+      SecurityGroupIngress:
+        - Description: Allow HTTP from com.amazonaws.global.cloudfront.origin-facing
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !FindInMap [AWSRegions2PrefixListID, !Ref 'AWS::Region', PrefixList]
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Environment
+          Value: Dev
+      VpcId:
+        Fn::ImportValue: !Sub ${VSCodeVpcStackName}-VpcId
+
+  VpcCodeSecGrpIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref VpcCodeSecGrp
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId:
+        Fn::ImportValue: !Sub ${VSCodeVpcStackName}-SecurityGroupId
+
+  VpcCodeSecGrpSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref VpcCodeSecGrp
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId: !Ref VpcCodeSecGrp
+
+  VpcEndpointSecGrpIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub ${VSCodeVpcStackName}-SecurityGroupId
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId: !Ref VpcCodeSecGrp
+
+  GetEnvironmentDataFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Tags:
+        - Key: Environment
+          Value: Dev
+      Handler: index.lambda_handler
+      Role:
+        Fn::GetAtt:
+          - VSCodeLambdaExecutionRole
+          - Arn
+      Runtime: python3.12
+      MemorySize: 1024
+      Timeout: "600"
+      Code:
+        ZipFile: |
+          from random import choice
+          from string import ascii_lowercase, ascii_uppercase, digits
+          import boto3
+          import traceback
+          import cfnresponse
+          import logging
+          logger = logging.getLogger()
+          logger.setLevel("INFO")
+
+          def get_ami_id(ec2, ami_name: str) -> str:
+            logger.info('get ami id for name: {}'.format(ami_name))
+            resp = ec2.describe_images(
+                Filters=[
+                {'Name': 'is-public', 'Values': ['true']},
+                {'Name': 'name', 'Values': [ami_name]}
+                ]
+            )
+            print(f"response {resp}")
+            return resp['Images'][0]['ImageId']
+          def generate_workspace_password(size: int) -> str:
+            logger.info('generate workspace password')
+            return ''.join(choice(ascii_lowercase + ascii_uppercase + digits) for _ in range(size))
+          def lambda_handler(event, context):
+            logger.info('event: {}'.format(event))
+            logger.info('context: {}'.format(context))
+            data = {}
+            if event['RequestType'] not in ['Create', 'Delete']:
+              return cfnresponse.send(event, context, cfnresponse.SUCCESS, data)
+            try:
+              if event['RequestType'] in ['Delete']:
+                data = {'Success': 'Custom Resource removed'}
+                # delete files in bucket
+                s3 = boto3.resource('s3')
+                vscodebucketname = event['ResourceProperties']['VSCodeOutputBucket']
+                vscodebucket = s3.Bucket(vscodebucketname)
+                for obj in vscodebucket.objects.filter():
+                  s3.Object(vscodebucket.name, obj.key).delete()
+              else:
+                ec2 = boto3.client('ec2')
+                print(ami_name := event['ResourceProperties']['AmiName'])
+                print(password_size := int(event['ResourceProperties']['PasswordSize']))
+                data['AmiId'] = get_ami_id(ec2, ami_name)
+                data['WorkspacePassword'] = generate_workspace_password(password_size)
+            except Exception as e:
+              print(e)
+              print(traceback.format_exc())
+              data = {'Error': traceback.format_exc(e)}
+              return cfnresponse.send(event, context, cfnresponse.FAILED, data)
+            print(data)
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, data)
+
+  GetEnvironmentDataFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${GetEnvironmentDataFunction}"
+
+  EnvironmentData:
+    Type: Custom::DefaultVpcData
+    DependsOn: GetEnvironmentDataFunctionLogGroup
+    Properties:
+      ServiceToken: !GetAtt GetEnvironmentDataFunction.Arn
+      AmiName: !Ref VSCodeImageName
+      PasswordSize: 20
+      VSCodeOutputBucket: !Ref VSCodeOutputBucket
+
+  VSCodeInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: "/dev/xvda"
+          Ebs:
+            VolumeSize: 300
+            VolumeType: gp3
+            DeleteOnTermination: true
+      ImageId: !GetAtt EnvironmentData.AmiId
+      InstanceType: !Ref VSCodeInstanceType
+      IamInstanceProfile: !Ref VSCodeInstanceProfile
+      SecurityGroupIds:
+        - !Ref VpcCodeSecGrp
+      SubnetId: !Select
+        - 0
+        - Fn::Split:
+          - ","
+          - Fn::ImportValue:
+              !Sub "${VSCodeVpcStackName}-SubnetIds"
+      KeyName: !Ref "AWS::NoValue"
+      Tags:
+        - Key: Name
+          Value: VSCodeInstance
+        - Key: SSMBootstrap
+          Value: Active
+        - Key: Environment
+          Value: Dev
+
+Outputs:
+  VSCodeServerURL:
+    Description: VSCode Server URL
+    Value: !Sub https://${CloudFrontDistribution.DomainName}/?folder=${HomeFolder}
+    Export:
+      Name: !Sub "${AWS::StackName}-VSCodeServerURL"
+  VSCodeServerPassword:
+    Description: VSCode Server Password
+    Value:
+      Fn::GetAtt:
+        - EnvironmentData
+        - WorkspacePassword
+    Export:
+      Name: !Sub "${AWS::StackName}-VSCodeServerPassword"
