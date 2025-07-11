@@ -1,0 +1,108 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: Opensearch Cluster (Serverless) collection for Bedrock Knowledge base
+Parameters:
+  OpensearchCollectionName:
+    Type: String
+    Description: OpenSearch collection name for Bedrock Knowledge base
+    Default: knowledgebase-collection
+  OpensearchCollectionPrincipal:
+    Type: String
+    Description: IAM principal to allowed to access OpenSearch collection
+    Default: "role/service-role/VSCodeInstanceRole"
+  OpensearchBedrockKnowledgeBaseExecutionRoleName:
+    Type: String
+    Description: Execution role name for Bedrock Knowledge base
+    Default: OpensearchBedrockKnowledgeBaseExecutionRole
+Resources:
+  OpenSearchCollection:
+    Type: "AWS::OpenSearchServerless::Collection"
+    Properties:
+      Name: !Ref OpensearchCollectionName
+      Type: VECTORSEARCH
+      Description: Vector search collection for Bedrock Knowledge base
+    DependsOn:
+      - OpenSearchEncryptionPolicy
+      - OpenSearchSecurityPolicy
+  OpenSearchEncryptionPolicy:
+    Type: "AWS::OpenSearchServerless::SecurityPolicy"
+    Properties:
+      Name: knowledgebase-encryption-policy
+      Type: encryption
+      Description: Encryption policy for collection
+      Policy: !Sub >-
+        {"Rules":[{"ResourceType":"collection","Resource":["collection/${OpensearchCollectionName}"]}],"AWSOwnedKey":true}
+  OpenSearchAccessPolicy:
+    Type: "AWS::OpenSearchServerless::AccessPolicy"
+    Properties:
+      Name: knowledgebase-access-policy
+      Type: data
+      Description: Access policy for assistant
+      Policy: !Sub >-
+        [{"Description":"Access for provided principal","Rules":[{"ResourceType":"index","Resource":["index/*/*"],"Permission":["aoss:*"]},
+        {"ResourceType":"collection","Resource":["collection/${OpensearchCollectionName}"],"Permission":["aoss:*"]}],
+        "Principal":["arn:aws:iam::${AWS::AccountId}:${OpensearchCollectionPrincipal}","arn:aws:iam::${AWS::AccountId}:role/WSParticipantRole","arn:aws:iam::${AWS::AccountId}:role/service-role/${OpensearchBedrockKnowledgeBaseExecutionRoleName}"]}]
+    DependsOn:
+      - OpensearchBedrockKnowledgeBaseExecutionRole
+
+  OpenSearchSecurityPolicy:
+    Type: "AWS::OpenSearchServerless::SecurityPolicy"
+    Properties:
+      Name: knowledgebase-network-policy
+      Type: network
+      Description: Network policy for collection
+      Policy: !Sub >-
+        [{"Rules":[{"ResourceType":"collection","Resource":["collection/${OpensearchCollectionName}"]},
+        {"ResourceType":"dashboard","Resource":["collection/${OpensearchCollectionName}"]}],"AllowFromPublic":true}]
+
+  OpensearchBedrockKnowledgeBaseExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref OpensearchBedrockKnowledgeBaseExecutionRoleName
+      Tags:
+        - Key: Environment
+          Value: Dev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - bedrock.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+      Path: "/service-role/"
+      Policies:
+        - PolicyName: AmazonBedrockExecutionPolicyForKnowledgeBase
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource: !GetAtt OpenSearchCollection.Arn
+
+Outputs:
+  OpenSearchCollectionName:
+    Description: OpenSearch Collection Name
+    Value: !Ref OpensearchCollectionName
+    Export:
+      Name: !Sub "${AWS::StackName}-OpensearchCollectionNameExportName"
+  OpenSearchCollectionArn:
+    Description: OpenSearch Collection Arn
+    Value: !GetAtt OpenSearchCollection.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-OpensearchCollectionArnExportName"
+  OpensearchEndpointURL:
+    Description: OpenSearch Endpoint URL
+    Value: !GetAtt OpenSearchCollection.CollectionEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-OpensearchEndpointURLExportName"
+  OpensearchBedrockKnowledgeBaseExecutionRoleArn:
+    Description: OpenSearch Knowledge Base Execution Role Arn
+    Value: !GetAtt OpensearchBedrockKnowledgeBaseExecutionRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-OpensearchKnowledgeBaseExecutionRoleArnExportName"
