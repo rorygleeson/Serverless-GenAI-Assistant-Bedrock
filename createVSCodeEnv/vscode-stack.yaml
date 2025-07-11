@@ -440,8 +440,7 @@ Resources:
       IpProtocol: tcp
       FromPort: 0
       ToPort: 65535
-      SourceSecurityGroupId:
-        Fn::ImportValue: !Sub ${VSCodeVpcStackName}-SecurityGroupId
+      SourceSecurityGroupId: !Ref ${VSCodeVpcStackName}-SecurityGroupId
 
   VpcCodeSecGrpSelfIngress:
     Type: AWS::EC2::SecurityGroupIngress
