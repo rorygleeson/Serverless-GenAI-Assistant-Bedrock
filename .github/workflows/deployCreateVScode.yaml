@@ -35,7 +35,7 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       # Deploy to AWS CloudFormation
-      - name: Deploy to AWS CloudFormation
+      - name: Deploy to AWS CloudFormation 2
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
           name: CreateVSCodeEnv
