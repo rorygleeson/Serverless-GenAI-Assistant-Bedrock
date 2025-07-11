@@ -39,6 +39,6 @@ jobs:
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
           name: opensearch-stack
-          template: createVectorStore/opensearch-stack.yml
+          template: createVectorStore/opensearch-stack.yaml
           no-fail-on-empty-changeset: "1"
   
