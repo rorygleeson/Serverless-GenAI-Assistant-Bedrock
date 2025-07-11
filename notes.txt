@@ -1,2 +1,8 @@
 notes
 ff-dd-ee
+
+
+ Unresolved resource dependencies [${VSCodeVpcStackName}-SecurityGroupId] in the Resources block of the template
+
+
+ddddd
