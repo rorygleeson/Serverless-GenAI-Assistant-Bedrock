@@ -10,7 +10,7 @@ Parameters:
   VpcSubnet1AZ:
     Type: AWS::EC2::AvailabilityZone::Name
     Default: us-west-2a
-    Description: Availability Zone for subnet 1 (e.g. us-east-1a, us-west-2a, etc.)
+    Description: Availability Zone for subnet 1 (example us-east-1a, us-west-2a, etc.)
   VpcSubnet2AZ:
     Type: AWS::EC2::AvailabilityZone::Name
     Default: us-west-2b
