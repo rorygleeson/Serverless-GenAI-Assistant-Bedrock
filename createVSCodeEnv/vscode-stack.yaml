@@ -561,7 +561,7 @@ Resources:
         - Fn::Split:
           - ","
           - Fn::ImportValue:
-              !Sub "${VSCodeVpcStackName}-SubnetIds"
+              !Sub "cloud9-vpc-stack-SubnetIds"
       KeyName: !Ref "AWS::NoValue"
       Tags:
         - Key: Name
