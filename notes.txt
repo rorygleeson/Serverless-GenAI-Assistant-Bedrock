@@ -1,1 +1,56 @@
-test 1
+Some fixes:
+
+1) For creating vector store, changed index body in opensearch-create-index.py
+Changed engine to "faiss". 
+
+
+index_body = {
+    'settings': {
+        'index': {
+            'knn': True,
+            'knn.algo_param.ef_search': 100,  # Optional: tune for search performance
+            'number_of_shards': 1,
+            'number_of_replicas': 0
+        }
+    },
+    'mappings': {
+        'properties': {
+            'vector_field': {  # Name of your vector field
+                'type': 'knn_vector',
+                'dimension': 1024,
+                'method': {
+                    'name': 'hnsw',
+                    'space_type': 'cosinesimil',
+                    'engine': 'faiss',
+                    'parameters': {
+                        'ef_construction': 128,
+                        'm': 24
+                    }
+                }
+            },
+            'text_field': {
+                'type': 'text'
+            }
+        }
+    }
+}
+
+
+
+2) Fix for opensearch dashboard not opening.
+
+Created new IAM user, full admin access but also added this policy. 
+
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Effect": "Allow",
+			"Action": [
+				"aoss:APIAccessAll",
+				"aoss:DashboardsAccessAll"
+			],
+			"Resource": "*"
+		}
+	]
+}
